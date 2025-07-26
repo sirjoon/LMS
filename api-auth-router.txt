@@ -1,0 +1,76 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+import structlog
+
+from database import get_db
+from models import User
+from utils.auth import create_access_token, get_current_user
+
+logger = structlog.get_logger()
+
+router = APIRouter()
+
+
+class LoginRequest(BaseModel):
+    username: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    role: str
+    manager_id: int | None = None
+    
+    class Config:
+        from_attributes = True
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(login_request: LoginRequest, db: Session = Depends(get_db)):
+    """Login with username only (phase 1 auth)"""
+    try:
+        # Find user by username
+        user = db.query(User).filter(User.username == login_request.username).first()
+        
+        if not user:
+            logger.warning("Login attempt with invalid username", username=login_request.username)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Create access token
+        access_token = create_access_token(
+            data={"sub": user.username, "role": user.role.value}
+        )
+        
+        logger.info("User logged in successfully", username=user.username, role=user.role.value)
+        
+        return LoginResponse(
+            access_token=access_token,
+            role=user.role.value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Login failed", username=login_request.username, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed"
+        )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current user information"""
+    return UserResponse.from_orm(current_user)

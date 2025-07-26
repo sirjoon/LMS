@@ -1,0 +1,88 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql+psycopg://leave_admin:leave_pass@leave_db:5432/leave_management
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: supersecret_change_in_production
+      SEED_DEMO: "true"
+      LOG_LEVEL: INFO
+      ENVIRONMENT: development
+    ports: 
+      - "8000:8000"
+    depends_on:
+      - leave_db
+      - redis
+    volumes:
+      - ./api:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    restart: unless-stopped
+
+  leave_db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: leave_admin
+      POSTGRES_PASSWORD: leave_pass
+      POSTGRES_DB: leave_management
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leave_admin -d leave_management"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      - leave_db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
